@@ -549,7 +549,7 @@ bool Adafruit_PN532::setPassiveActivationRetries(uint8_t maxRetries) {
 /*!
     Waits for an ISO14443A target to enter the field
 
-    @param  cardBaudRate  Baud rate of the card
+    @param  cardBaudRate  Baud rate of the card (also the modulation type)
     @param  uid           Pointer to the array that will be populated
                           with the card's UID (up to 7 bytes)
     @param  uidLength     Pointer to the variable that will hold the
@@ -562,8 +562,24 @@ bool Adafruit_PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, ui
   pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
   pn532_packetbuffer[1] = 1;  // max 1 cards at once (we can set this to 2 later)
   pn532_packetbuffer[2] = cardbaudrate;
+  uint8_t packet_write; // send packet size
+  uint8_t packet_read;  // read packet size
 
-  if (!sendCommandCheckAck(pn532_packetbuffer, 3, timeout))
+  if (cardbaudrate == PN532_MIFARE_ISO14443A) {
+      packet_write = 3;
+      packet_read = 20;
+  } else {
+      // must be PN532_FELICA_212 or PN532_FELICA_424
+      pn532_packetbuffer[3] = 0x00;             // TT datasheet example p121
+      pn532_packetbuffer[4] = 0xFF;
+      pn532_packetbuffer[5] = 0xFF;
+      pn532_packetbuffer[6] = 0x01;
+      pn532_packetbuffer[7] = 0x00;
+      packet_write = 8;
+      packet_read = 28;
+  }
+
+  if (!sendCommandCheckAck(pn532_packetbuffer, packet_write, timeout))
   {
     #ifdef PN532DEBUG
       PN532DEBUGPRINT.println(F("No card(s) read"));
@@ -585,43 +601,68 @@ bool Adafruit_PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, ui
   }
 
   // read data packet
-  readdata(pn532_packetbuffer, 20);
+  readdata(pn532_packetbuffer, packet_read);
   // check some basic stuff
 
-  /* ISO14443A card response should be in the following format:
+  // Where in the reply packet do we copy the UID from?
+  uint8_t uidoffset;
+  uint8_t uidlen;
 
-    byte            Description
-    -------------   ------------------------------------------
-    b0..6           Frame header and preamble
-    b7              Tags Found
-    b8              Tag Number (only one used in this example)
-    b9..10          SENS_RES
-    b11             SEL_RES
-    b12             NFCID Length
-    b13..NFCIDLen   NFCID                                      */
-
-  #ifdef MIFAREDEBUG
-    PN532DEBUGPRINT.print(F("Found ")); PN532DEBUGPRINT.print(pn532_packetbuffer[7], DEC); PN532DEBUGPRINT.println(F(" tags"));
-  #endif
   if (pn532_packetbuffer[7] != 1)
-    return 0;
+      // we unexpectedly found more than one tag
+      return 0;
 
-  uint16_t sens_res = pn532_packetbuffer[9];
-  sens_res <<= 8;
-  sens_res |= pn532_packetbuffer[10];
-  #ifdef MIFAREDEBUG
-    PN532DEBUGPRINT.print(F("ATQA: 0x"));  PN532DEBUGPRINT.println(sens_res, HEX);
-    PN532DEBUGPRINT.print(F("SAK: 0x"));  PN532DEBUGPRINT.println(pn532_packetbuffer[11], HEX);
-  #endif
+  switch (cardbaudrate) {
+      case PN532_MIFARE_ISO14443A:
+          /* ISO14443A card response should be in the following format:
 
-  /* Card appears to be Mifare Classic */
-  *uidLength = pn532_packetbuffer[12];
+            byte            Description
+            -------------   ------------------------------------------
+            b0..6           Frame header and preamble
+            b7              Tags Found
+            b8              Tag Number (only one used in this example)
+            b9..10          SENS_RES
+            b11             SEL_RES
+            b12             NFCID Length
+            b13..NFCIDLen   NFCID                                      */
+
+          #ifdef MIFAREDEBUG
+            PN532DEBUGPRINT.print(F("Found ")); PN532DEBUGPRINT.print(pn532_packetbuffer[7], DEC); PN532DEBUGPRINT.println(F(" tags"));
+
+            uint16_t sens_res = pn532_packetbuffer[9];
+            sens_res <<= 8;
+            sens_res |= pn532_packetbuffer[10];
+            PN532DEBUGPRINT.print(F("ATQA: 0x"));  PN532DEBUGPRINT.println(sens_res, HEX);
+            PN532DEBUGPRINT.print(F("SAK: 0x"));  PN532DEBUGPRINT.println(pn532_packetbuffer[11], HEX);
+          #endif
+
+          uidoffset = 13;
+          uidlen = pn532_packetbuffer[12];
+
+          /* Card appears to be Mifare Classic */
+          break;
+      case PN532_FELICA_212:
+      case PN532_FELICA_424:
+          /*
+           * b9         POL_RES
+           * b10        0x01 "response code"
+           * b11..b19   NFCID2t
+           * ...
+           */
+          uidoffset = 11;
+          uidlen = 8;
+          break;
+  }
+
+  // TODO - use uidLength as a uid buffer size input for overflow checks
+
+  *uidLength = uidlen;
   #ifdef MIFAREDEBUG
     PN532DEBUGPRINT.print(F("UID:"));
   #endif
-  for (uint8_t i=0; i < pn532_packetbuffer[12]; i++)
+  for (uint8_t i=0; i < uidlen; i++)
   {
-    uid[i] = pn532_packetbuffer[13+i];
+    uid[i] = pn532_packetbuffer[uidoffset+i];
     #ifdef MIFAREDEBUG
       PN532DEBUGPRINT.print(F(" 0x"));PN532DEBUGPRINT.print(uid[i], HEX);
     #endif
@@ -631,6 +672,68 @@ bool Adafruit_PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, ui
   #endif
 
   return 1;
+}
+
+bool Adafruit_PN532::inAutoPoll(void) // TT added
+{
+
+  pn532_packetbuffer[0] = PN532_COMMAND_INAUTOPOLL;
+  pn532_packetbuffer[1] = 0x01;  // poll number
+  pn532_packetbuffer[2] = 0x01;  // poll period
+  pn532_packetbuffer[3] = 0x01;  // type1 generic 212
+  pn532_packetbuffer[4] = 0x02;  // type2 generic 424
+  pn532_packetbuffer[5] = 0x11;  // type3 felica 212
+  pn532_packetbuffer[6] = 0x00;  // type4 generic 106
+
+  if (! sendCommandCheckAck(pn532_packetbuffer, 7))
+    return false;  // no connection
+
+  // read data packet
+  readdata(pn532_packetbuffer, sizeof(pn532_packetbuffer));
+
+  uint8_t nbtg = pn532_packetbuffer[7];
+  if (nbtg==0)
+    return false;   // no cards read
+
+  uint8_t offset = 8;
+  for (uint8_t tag = 0; tag < nbtg; tag++) {
+      Serial.print("tag: ");
+      Serial.print(tag);
+
+      uint8_t cardtype = pn532_packetbuffer[offset];
+      uint8_t taglen = pn532_packetbuffer[offset+1];
+      Serial.print(" type: ");
+      Serial.print(cardtype, HEX);
+
+      // Where in the reply packet do we copy the UID from?
+      uint8_t uidoffset;
+      uint8_t uidlen;
+
+      Serial.print(" uid: ");
+      switch (cardtype) {             // see datasheet p144
+          case 0x10:
+          case 0x20:
+              uidlen = pn532_packetbuffer[offset+6];
+              uidoffset = offset+7;
+              break;
+          case 0x11:
+              uidlen = 8;
+              uidoffset = offset+5;
+              break;
+          default:
+              uidlen = 0;
+              uidoffset = 0;
+              break;
+      }
+      for(uint8_t i=0; i<uidlen; i++)
+      {
+        Serial.print(pn532_packetbuffer[uidoffset+i], HEX);
+        Serial.print(" ");
+      }
+      Serial.println();
+      offset += taglen +2;
+  }
+  return true;
 }
 
 /**************************************************************************/
@@ -1668,7 +1771,7 @@ void Adafruit_PN532::writecommand(uint8_t* cmd, uint8_t cmdlen) {
       PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(PN532_PREAMBLE, HEX);
       PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(PN532_STARTCODE2, HEX);
       PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(cmdlen, HEX);
-      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(~cmdlen + 1, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(uint8_t(~cmdlen + 1), HEX);
       PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(PN532_HOSTTOPN532, HEX);
     #endif
 
@@ -1688,7 +1791,7 @@ void Adafruit_PN532::writecommand(uint8_t* cmd, uint8_t cmdlen) {
     #endif
 
     #ifdef PN532DEBUG
-      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(~checksum, HEX);
+      PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(uint8_t(~checksum), HEX);
       PN532DEBUGPRINT.print(F(" 0x")); PN532DEBUGPRINT.print(PN532_POSTAMBLE, HEX);
       PN532DEBUGPRINT.println();
     #endif

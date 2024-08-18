@@ -95,6 +95,8 @@
 #define PN532_I2C_READYTIMEOUT              (20)
 
 #define PN532_MIFARE_ISO14443A              (0x00)
+#define PN532_FELICA_212                    (0x01)
+#define PN532_FELICA_424                    (0x02)
 
 // Mifare Commands
 #define MIFARE_CMD_AUTH_A                   (0x60)
@@ -159,7 +161,9 @@ class Adafruit_PN532{
   Adafruit_PN532(uint8_t irq, uint8_t reset);  // Hardware I2C
   Adafruit_PN532(uint8_t ss);  // Hardware SPI
   void begin(void);
-  
+
+  bool     inAutoPoll(void);
+
   // Generic PN532 functions
   bool     SAMConfig(void);
   uint32_t getFirmwareVersion(void);
