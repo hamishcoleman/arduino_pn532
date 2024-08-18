@@ -698,7 +698,7 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
 
   uint8_t offset = 8;
   for (uint8_t tag = 0; tag < nbtg; tag++) {
-#if TAG_DEBUG
+#ifdef TAG_DEBUG
       // TODO:
       // change the function signature to include uid/uidlen outputs, similar
       // to how readPassiveTargetID() works
