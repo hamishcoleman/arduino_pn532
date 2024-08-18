@@ -65,6 +65,7 @@ byte pn532response_firmwarevers[] = {0x00, 0xFF, 0x06, 0xFA, 0xD5, 0x03};
 // Uncomment these lines to enable debug output for PN532(SPI) and/or MIFARE related code
 // #define PN532DEBUG
 // #define MIFAREDEBUG
+#define TAG_DEBUG
 
 // If using Native Port on Arduino Zero or Due define as SerialUSB
 #define PN532DEBUGPRINT Serial
@@ -697,6 +698,12 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
 
   uint8_t offset = 8;
   for (uint8_t tag = 0; tag < nbtg; tag++) {
+#if TAG_DEBUG
+      // TODO:
+      // change the function signature to include uid/uidlen outputs, similar
+      // to how readPassiveTargetID() works
+      // Then serial output can be done from the calling application
+      //
       Serial.print("tag: ");
       Serial.print(tag);
 
@@ -732,6 +739,7 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
       }
       Serial.println();
       offset += taglen +2;
+#endif
   }
   return true;
 }
