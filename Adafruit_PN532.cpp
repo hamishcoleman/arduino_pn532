@@ -675,8 +675,11 @@ bool Adafruit_PN532::readPassiveTargetID(uint8_t cardbaudrate, uint8_t * uid, ui
   return 1;
 }
 
-bool Adafruit_PN532::inAutoPoll(void) // TT added
-{
+int Adafruit_PN532::inAutoPoll(uint8_t *buf, uint8_t buflen) {
+    if (buflen < sizeof(pn532_packetbuffer)) {
+        // Output buffer is possibly too small
+        return -1;
+    }
 
   pn532_packetbuffer[0] = PN532_COMMAND_INAUTOPOLL;
   pn532_packetbuffer[1] = 0x01;  // poll number
@@ -692,11 +695,15 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
   // read data packet
   readdata(pn532_packetbuffer, sizeof(pn532_packetbuffer));
 
-  uint8_t nbtg = pn532_packetbuffer[7];
-  if (nbtg==0)
-    return false;   // no cards read
+    uint8_t pos = 7;
 
-  uint8_t offset = 8;
+    uint8_t nbtg = pn532_packetbuffer[pos++];
+    if (nbtg==0) {
+        return 0;  // no cards read
+    }
+
+    memcpy(buf, &pn532_packetbuffer[pos], sizeof(pn532_packetbuffer) - pos);
+
   for (uint8_t tag = 0; tag < nbtg; tag++) {
 #ifdef TAG_DEBUG
       // TODO:
@@ -707,8 +714,8 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
       Serial.print("tag: ");
       Serial.print(tag);
 
-      uint8_t cardtype = pn532_packetbuffer[offset];
-      uint8_t taglen = pn532_packetbuffer[offset+1];
+      uint8_t cardtype = pn532_packetbuffer[pos];
+      uint8_t taglen = pn532_packetbuffer[pos+1];
       Serial.print(" type: ");
       Serial.print(cardtype, HEX);
 
@@ -720,12 +727,12 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
       switch (cardtype) {             // see datasheet p144
           case 0x10:
           case 0x20:
-              uidlen = pn532_packetbuffer[offset+6];
-              uidoffset = offset+7;
+              uidlen = pn532_packetbuffer[pos+6];
+              uidoffset = pos+7;
               break;
           case 0x11:
               uidlen = 8;
-              uidoffset = offset+5;
+              uidoffset = pos+5;
               break;
           default:
               uidlen = 0;
@@ -738,10 +745,10 @@ bool Adafruit_PN532::inAutoPoll(void) // TT added
         Serial.print(" ");
       }
       Serial.println();
-      offset += taglen +2;
+      pos += taglen +2;
 #endif
   }
-  return true;
+    return nbtg;
 }
 
 /**************************************************************************/

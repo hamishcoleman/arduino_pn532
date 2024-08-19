@@ -162,7 +162,7 @@ class Adafruit_PN532{
   Adafruit_PN532(uint8_t ss);  // Hardware SPI
   void begin(void);
 
-  bool     inAutoPoll(void);
+  int      inAutoPoll(uint8_t *buf, uint8_t buflen);
 
   // Generic PN532 functions
   bool     SAMConfig(void);
