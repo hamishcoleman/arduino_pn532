@@ -702,6 +702,14 @@ int Adafruit_PN532::inAutoPoll(uint8_t *buf, uint8_t buflen) {
         return 0;  // no cards read
     }
 
+    // TODO:
+    // The api for this class is basically wrong - In several ways. In this
+    // case, we cannot tell inDataExchange which target to hit if we dont
+    // set this private variable, which is not directly settable by any part
+    // of the API.
+    // Just assume that we can only touch the first card
+    _inListedTag = pn532_packetbuffer[pos+2];
+
     memcpy(buf, &pn532_packetbuffer[pos], sizeof(pn532_packetbuffer) - pos);
 
 #ifdef TAG_DEBUG
